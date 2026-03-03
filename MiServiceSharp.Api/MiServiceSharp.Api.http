@@ -1,0 +1,204 @@
+@host=http://localhost:5184
+@apiKey=change-this-api-key
+@jwt=
+
+### Health
+GET {{host}}/api/v1/health
+
+### Login micoapi
+POST {{host}}/api/v1/auth/login
+Content-Type: application/json
+
+{
+	"username": "{{MI_USER}}",
+	"password": "{{MI_PASS}}",
+	"sid": "micoapi"
+}
+
+### Start login challenge flow (recommended for notificationUrl cases)
+POST {{host}}/api/v1/auth/login/challenge/start
+Content-Type: application/json
+
+{
+	"username": "{{MI_USER}}",
+	"password": "{{MI_PASS}}",
+	"sid": "micoapi"
+}
+
+### Continue challenge flow after user completed SMS verification page
+POST {{host}}/api/v1/auth/login/challenge/continue
+Content-Type: application/json
+
+{
+	"sessionId": "REPLACE_WITH_SESSION_ID"
+}
+
+### Poll challenge flow status
+GET {{host}}/api/v1/auth/login/challenge/REPLACE_WITH_SESSION_ID
+
+### Login xiaomiio
+POST {{host}}/api/v1/auth/login
+Content-Type: application/json
+
+{
+	"username": "{{MI_USER}}",
+	"password": "{{MI_PASS}}",
+	"sid": "xiaomiio"
+}
+
+### Read token file
+GET {{host}}/api/v1/auth/token
+X-API-Key: {{apiKey}}
+
+### Read token file by JWT
+GET {{host}}/api/v1/auth/token
+Authorization: Bearer {{jwt}}
+
+### Issue JWT (also triggers cloud login)
+POST {{host}}/api/v1/auth/jwt
+Content-Type: application/json
+
+{
+	"username": "{{MI_USER}}",
+	"password": "{{MI_PASS}}"
+}
+
+### Mina devices
+GET {{host}}/api/v1/mina/devices
+X-API-Key: {{apiKey}}
+
+### Miio devices
+GET {{host}}/api/v1/miio/devices
+X-API-Key: {{apiKey}}
+
+### Mina TTS
+POST {{host}}/api/v1/mina/tts
+Content-Type: application/json
+X-API-Key: {{apiKey}}
+
+{
+	"account": {},
+	"deviceId": "YOUR_DEVICE_ID",
+	"text": "你好，这是 API 测试"
+}
+
+### Mina play url
+POST {{host}}/api/v1/mina/play-url
+Content-Type: application/json
+X-API-Key: {{apiKey}}
+
+{
+	"account": {},
+	"deviceId": "YOUR_DEVICE_ID",
+	"url": "http://example.com/test.mp3",
+	"type": 2
+}
+
+### Miio home rpc
+POST {{host}}/api/v1/miio/home-rpc
+Content-Type: application/json
+X-API-Key: {{apiKey}}
+
+{
+	"account": {},
+	"did": "YOUR_DID",
+	"method": "get_prop",
+	"params": ["power"]
+}
+
+### Miio home get-props
+POST {{host}}/api/v1/miio/home/get-props
+Content-Type: application/json
+X-API-Key: {{apiKey}}
+
+{
+	"account": {},
+	"did": "YOUR_DID",
+	"props": ["power", "temperature"]
+}
+
+### Miio home set-prop
+POST {{host}}/api/v1/miio/home/set-prop
+Content-Type: application/json
+X-API-Key: {{apiKey}}
+
+{
+	"account": {},
+	"did": "YOUR_DID",
+	"prop": "power",
+	"value": "on"
+}
+
+### Miot get-props
+POST {{host}}/api/v1/miio/miot/get-props
+Content-Type: application/json
+X-API-Key: {{apiKey}}
+
+{
+	"account": {},
+	"did": "YOUR_DID",
+	"iids": [
+		{ "siid": 2, "piid": 1 },
+		{ "siid": 2, "piid": 2 }
+	]
+}
+
+### Miot set-prop
+POST {{host}}/api/v1/miio/miot/set-prop
+Content-Type: application/json
+X-API-Key: {{apiKey}}
+
+{
+	"account": {},
+	"did": "YOUR_DID",
+	"siid": 2,
+	"piid": 2,
+	"value": 1
+}
+
+### Miot action
+POST {{host}}/api/v1/miio/miot/action
+Content-Type: application/json
+X-API-Key: {{apiKey}}
+
+{
+	"account": {},
+	"did": "YOUR_DID",
+	"siid": 2,
+	"aiid": 1,
+	"args": []
+}
+
+### Miot spec (json)
+POST {{host}}/api/v1/miio/miot-spec
+Content-Type: application/json
+X-API-Key: {{apiKey}}
+
+{
+	"account": {},
+	"type": "zhimi.airp.va1",
+	"format": "json"
+}
+
+### Miot spec (python text)
+POST {{host}}/api/v1/miio/miot-spec
+Content-Type: application/json
+X-API-Key: {{apiKey}}
+
+{
+	"account": {},
+	"type": "zhimi.airp.va1",
+	"format": "python"
+}
+
+### Local miio command
+POST {{host}}/api/v1/miio/local/command
+Content-Type: application/json
+X-API-Key: {{apiKey}}
+
+{
+	"host": "192.168.1.120",
+	"tokenHex": "00112233445566778899AABBCCDDEEFF",
+	"method": "miIO.info",
+	"params": []
+}
