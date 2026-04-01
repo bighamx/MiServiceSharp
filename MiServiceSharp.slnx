@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="MiServiceSharp.Api/MiServiceSharp.Api.csproj" />
+  <Project Path="MiServiceSharp.Demo/MiServiceSharp.Demo.csproj" />
+  <Project Path="MiServiceSharp.Tests/MiServiceSharp.Tests.csproj" />
+  <Project Path="MiServiceSharp/MiServiceSharp.csproj" />
+</Solution>
