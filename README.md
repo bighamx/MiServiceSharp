@@ -111,3 +111,7 @@ dotnet run --project .\MiServiceSharp.Api
 Swagger UI：开发环境访问 `/swagger`，支持 Bearer 与 API Key 的 Authorize 按钮。
 
 请求示例见 [MiServiceSharp.Api/MiServiceSharp.Api.http](MiServiceSharp.Api/MiServiceSharp.Api.http)。
+
+## 许可证
+
+本项目采用 [Selective Freedom License (SFL) v1.0](https://github.com/bighamx/MIT-NoHuawei) 授权，详见 [LICENSE](LICENSE)。
