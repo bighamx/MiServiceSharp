@@ -6,7 +6,7 @@ namespace MiServiceSharp.Tests;
 public sealed class LocalMiioCryptoTests
 {
     [Fact]
-    public void EncryptDecrypt_ShouldRoundTrip()
+    public void EncryptDecrypt_ShouldMatchMiioProtocolVector()
     {
         var token = Convert.FromHexString("00112233445566778899AABBCCDDEEFF");
         var plain = Encoding.UTF8.GetBytes("{\"id\":1,\"method\":\"miIO.info\",\"params\":[]}");
@@ -14,6 +14,8 @@ public sealed class LocalMiioCryptoTests
         var cipher = MiioCrypto.Encrypt(token, plain);
         var back = MiioCrypto.Decrypt(token, cipher);
 
+        // Reference ciphertext generated independently with OpenSSL AES-128-CBC.
+        Assert.Equal("A5516EC6151955DC2BB2D43E7C84C18352A39A7F22FD2903D282A5783C6D56AC8C9C7629130A25FAC17D38175C1A7799", Convert.ToHexString(cipher));
         Assert.Equal(plain, back);
     }
 

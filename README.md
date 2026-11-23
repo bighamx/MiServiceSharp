@@ -1,37 +1,32 @@
 # MiServiceSharp
 
-基于 `MiService` 思路重写的 C# 类库，目标是：
+面向 .NET 8 的小米设备 C# 类库，提供账号登录、米家设备查询、MIoT 属性与动作调用、音箱控制、局域网 miIO 和云端消息订阅。
 
-- 小米账号登录与 token 文件存储
-- MiNA 云端接口（音箱控制）
-- MiIO 云端接口（米家云协议）
-- 本地 miIO UDP 协议（局域网控制）
-- 可运行 Demo 与单元/集成测试模板
+设备对象绑定自己的设备 ID，调用方式为 `device → service → property/action`。每台设备按自身型号加载 MIoT Spec，并据此检查属性权限、值类型和动作参数。
 
-## 项目结构
+## 目录
 
-- `MiServiceSharp/`
-  - `Auth/` 认证与登录
-  - `Storage/` token 文件存储
-  - `Services/` 云端协议能力（MiNA / MiIO）
-  - `Protocol/LocalMiio/` 本地 miIO 协议
-  - `Models/` 模型定义
-  - `Devices/` 绑定设备与 MIoT 能力的对象
-  - `MiServiceFacade.cs` 聚合入口
-- `MiServiceSharp.Demo/` 命令行演示
-- `MiServiceSharp.Api/` WebAPI 封装层（OpenAPI）
-- `MiServiceSharp.Tests/` 单元测试与集成测试模板
+- [快速开始](#快速开始)
+- [Demo 命令](#demo-命令)
+- [C# 设备调用](#c-设备调用)
+- [MIoT 型号与能力](#miot-型号与能力)
+- [云端消息订阅](#云端消息订阅)
+- [凭证与配置](#凭证与配置)
+- [WebAPI](#webapi)
+- [构建与测试](#构建与测试)
+- [常见问题](#常见问题)
+- [项目结构](#项目结构)
 
 ## 快速开始
 
-所有项目均使用 `.NET 8`。在仓库根目录构建并运行 Demo。
+安装 .NET 8 SDK，在仓库根目录执行。以下终端示例使用 PowerShell。
 
 ```powershell
 dotnet build MiServiceSharp.sln
 dotnet run --project .\MiServiceSharp.Demo -- help
 ```
 
-首次登录时设置账号和密码。已有有效令牌时可直接查询设备。
+### 1. 登录小米账号
 
 ```powershell
 $env:MI_USER = "你的小米账号"
@@ -39,215 +34,442 @@ $env:MI_PASS = "你的小米密码"
 dotnet run --project .\MiServiceSharp.Demo -- login
 ```
 
-令牌默认保存在仓库根目录的 `.mi.token.json`，也可通过 `MI_TOKEN_PATH` 指定位置。
-Demo 从编译输出目录运行时也会定位到同一个仓库令牌。
-可以导入已有的 Python MiService 令牌，导入结果写入 C# 项目的令牌文件。
+默认登录 `micoapi` 和 `xiaomiio`，分别用于音箱与米家云端接口。需要安全验证时，按终端提示在浏览器完成验证，再继续登录。
+
+成功后凭证保存到仓库根目录 `.mi.token.json`，后续调用会加载已有凭证。
+
+也可以导入 Python MiService 已有的 Token。请将路径替换为实际位置。
 
 ```powershell
 dotnet run --project .\MiServiceSharp.Demo -- import-token E:\GIT\MiService\.mi.token
 ```
 
-### Demo 命令
-
-每条设备命令显式接收设备名称或 ID。
-服务、属性和动作支持名称、数字 IID 或完整 URN。
+### 2. 查询设备与能力
 
 ```powershell
-dotnet run --project .\MiServiceSharp.Demo -- mina-devices
+# 米家设备，输出名称、型号、DID 和在线状态
 dotnet run --project .\MiServiceSharp.Demo -- miio-devices
-dotnet run --project .\MiServiceSharp.Demo -- status "客厅红外音箱"
-dotnet run --project .\MiServiceSharp.Demo -- pause "客厅音箱"
-dotnet run --project .\MiServiceSharp.Demo -- stop "主卧音箱"
-dotnet run --project .\MiServiceSharp.Demo -- volume "客厅红外音箱" 40
-dotnet run --project .\MiServiceSharp.Demo -- capabilities "客厅红外音箱"
-dotnet run --project .\MiServiceSharp.Demo -- get "客厅红外音箱" speaker volume
-dotnet run --project .\MiServiceSharp.Demo -- get "客厅红外音箱" 2 1
-dotnet run --project .\MiServiceSharp.Demo -- set "客厅红外音箱" speaker volume 40
-dotnet run --project .\MiServiceSharp.Demo -- spec xiaomi.wifispeaker.lx5a
+
+# 音箱设备，输出名称、miotDid 和 deviceId
+dotnet run --project .\MiServiceSharp.Demo -- mina-devices
+
+# 查看指定设备的型号能力
+dotnet run --project .\MiServiceSharp.Demo -- capabilities "客厅灯"
 ```
 
-`set` 的值使用 JSON 类型，例如 `true`、`40` 或带 JSON 引号的字符串。
-`action <设备> <服务> <动作> [JSON参数数组]` 根据该型号 Spec 检查参数数量和类型。
-`local-miio [方法] [JSON参数数组]` 使用 `MI_LOCAL_HOST` 和 `MI_LOCAL_TOKEN` 连接局域网设备。
-命令执行失败返回非零退出码，运行 `help` 可查看完整命令。
+### 3. 读取与控制
 
-### 面向对象的设备调用
+以下示例要求设备提供对应能力，请先根据 `capabilities` 的结果确认服务和属性。控制命令会操作真实设备。
+
+```powershell
+# 读取灯的开关状态
+dotnet run --project .\MiServiceSharp.Demo -- get "客厅灯" light on
+
+# 开灯、关灯
+dotnet run --project .\MiServiceSharp.Demo -- set "客厅灯" light on true
+dotnet run --project .\MiServiceSharp.Demo -- set "客厅灯" light on false
+
+# 音箱播放状态与音量
+dotnet run --project .\MiServiceSharp.Demo -- status "客厅音箱"
+dotnet run --project .\MiServiceSharp.Demo -- volume "客厅音箱" 40
+```
+
+## Demo 命令
+
+统一运行形式为 `dotnet run --project .\MiServiceSharp.Demo -- <命令> <参数>`。也可在编译输出目录运行 `MiServiceSharp.Demo.exe <命令> <参数>`。
+
+`<device>` 接收设备名称或 ID。音箱命令接受 `deviceId`、`miotDid` 或名称，米家设备命令接受 DID 或名称。名称重复时使用 ID。
+
+`<service>`、`<property>` 和 `<action>` 接收名称、数字 IID 或完整 URN。下表中的尖括号表示需要替换的参数。
+
+| 命令 | 用途 |
+| --- | --- |
+| `help` | 查看命令帮助 |
+| `login [micoapi|xiaomiio]` | 登录指定服务，省略时登录两个服务 |
+| `import-token <token-file>` | 导入已有凭证 |
+| `mina-devices` | 列出音箱 |
+| `miio-devices [keyword]` | 列出米家设备，可按关键字过滤 |
+| `pause <device>` / `stop <device>` / `play <device>` | 暂停、停止、播放 |
+| `status <device>` | 查询音箱播放状态 |
+| `volume <device> <0-100>` | 设置音箱音量 |
+| `tts <device> <text>` | 音箱语音播报 |
+| `play-url <device> <url>` | 音箱播放 URL |
+| `spec <model-or-URN>` | 获取型号或完整 URN 对应的 Spec |
+| `capabilities <device>` | 获取设备的完整 Spec |
+| `get <device> <service> <property>` | 读取属性 |
+| `set <device> <service> <property> <json-value>` | 写入属性 |
+| `action <device> <service> <action> [json-array]` | 调用动作 |
+| `oauth-login <app-id> <redirect-uri> [region] [--manual]` | 浏览器 OAuth 授权 |
+| `oauth-complete` | 恢复待完成的 OAuth 授权 |
+| `watch <device> [service property]` | 订阅全部属性或一个指定属性 |
+| `watch-events <device> [siid eiid]` | 订阅全部事件或一个指定事件 |
+| `local-miio [method] [json-array]` | 执行局域网 miIO 命令 |
+
+`set` 按 JSON 解析值，布尔值使用 `true` / `false`，数值使用 `40`，字符串需要包含 JSON 双引号。PowerShell 7 示例中的外层单引号用于保留 JSON 文本。
+
+```powershell
+# 数字 IID 的用法，具体含义以该型号 Spec 为准
+dotnet run --project .\MiServiceSharp.Demo -- get "客厅灯" 2 1
+
+# 字符串和动作参数的传参形式，将设备与能力名称替换为实际值
+dotnet run --project .\MiServiceSharp.Demo -- set "设备名称" "服务名称" "字符串属性名称" '"hello"'
+dotnet run --project .\MiServiceSharp.Demo -- action "设备名称" "服务名称" "动作名称" '[1,"hello"]'
+
+# 局域网 miIO，Token 为设备的十六进制 Token
+$env:MI_LOCAL_HOST = "192.168.1.100"
+$env:MI_LOCAL_TOKEN = "设备Token"
+dotnet run --project .\MiServiceSharp.Demo -- local-miio miIO.info
+```
+
+命令失败返回非零退出码，Ctrl+C 取消操作时返回 `130`。
+
+## C# 设备调用
+
+在自己的 .NET 8 项目中引用 `MiServiceSharp/MiServiceSharp.csproj`。
+
+### 初始化客户端
+
+以下初始化代码供本节后续片段共用。`InitializeAsync` 加载本地凭证，首次账号登录可通过 `LoginAsync` 完成。
 
 ```csharp
 using MiServiceSharp;
 using MiServiceSharp.Auth;
 using MiServiceSharp.Storage;
 
-using var httpClient = new HttpClient();
-var account = new MiAccountClient(httpClient, new MiAccountOptions(),
-    new FileMiTokenStore(FileMiTokenStore.GetDefaultPath()));
+using var http = new HttpClient();
+var account = new MiAccountClient(http, new MiAccountOptions
+{
+    Username = Environment.GetEnvironmentVariable("MI_USER") ?? string.Empty,
+    Password = Environment.GetEnvironmentVariable("MI_PASS") ?? string.Empty
+}, new FileMiTokenStore(FileMiTokenStore.GetDefaultPath()));
+
 await account.InitializeAsync();
 var client = new MiServiceFacade(account);
-
-var speakers = await client.Mina.GetDevicesAsync();
-var livingRoom = speakers.Single(device => device.Name == "客厅音箱");
-var bedroom = speakers.Single(device => device.Name == "主卧音箱");
-await livingRoom.PauseAsync();
-await bedroom.StopAsync();
 ```
 
-每个设备对象绑定自己的设备 ID。原有接收设备 ID 的底层服务方法继续提供。
-MIoT 设备按自身型号加载 Spec，服务、属性与动作通过实例描述映射到对应 IID。
+### 获取设备、读写属性
+
+示例根据设备实际型号查找 `light` 服务和 `on` 属性。名称、IID 和完整 URN 都通过该设备的 Spec 解析。
 
 ```csharp
 var devices = await client.MiioCloud.GetDevicesAsync();
-var speaker = devices.Single(device => device.Name == "客厅红外音箱");
-var service = await speaker.GetServiceAsync("speaker");
-var volume = service.GetProperty("volume");
-var currentVolume = await volume.GetAsync();
-await volume.SetAsync(40);
+var light = devices.Single(device => device.Name == "客厅灯");
+var service = await light.GetServiceAsync("light");
+var power = service.GetProperty("on");
 
-foreach (var capability in await speaker.GetServicesAsync())
+var current = await power.GetAsync();
+Console.WriteLine($"开关状态 {current}");
+await power.SetAsync(true);
+```
+
+### 枚举能力与调用动作
+
+```csharp
+foreach (var capability in await light.GetServicesAsync())
 {
-    Console.WriteLine($"{capability.Iid} {capability.Name}");
+    Console.WriteLine($"服务 {capability.Iid} {capability.Name}");
+    foreach (var property in capability.Properties)
+    {
+        Console.WriteLine(
+            $"  属性 {property.Iid} {property.Name} " +
+            $"R={property.CanRead} W={property.CanWrite} N={property.CanNotify}");
+    }
+    foreach (var action in capability.Actions)
+    {
+        Console.WriteLine($"  动作 {action.Iid} {action.Name}");
+    }
 }
 ```
 
-属性对象提供 `CanRead`、`CanWrite`、`CanNotify` 和完整 `Definition`，写入时检查格式、范围、步长与枚举值。
-Spec 中的 R、W、N 分别对应读取、写入和属性变化上报。通知接收通过下面的 OAuth/MQTT 订阅接口实现。
-动作对象提供 `InputProperties`，调用 `InvokeAsync` 后返回含输出参数的响应。
-同名能力可以通过 IID 或完整 URN 进一步定位。
-Spec 型号列表及单型号定义通过 `miot-spec.org/miot-spec-v2/` 在线获取，型号索引缓存到临时目录。
+取得实际支持的动作后，调用 `service.GetAction("动作名称").InvokeAsync(...)`。参数为 `IEnumerable<object?>`，按照 `InputProperties` 的顺序传入，无参数动作可直接调用 `InvokeAsync()`。返回的 `JsonNode` 保留云端响应及输出参数。
 
-### 实时消息订阅
+### 音箱控制
 
-`MiotSubscriptionClient` 使用 MQTT 5 和 TLS 连接小米云端，接收属性变化和设备事件。
-设备查询及控制使用 `.mi.token.json`，消息订阅使用 OAuth Access Token，授权结果保存到项目根目录的 `.mi.oauth.json`。
-可通过 `MI_OAUTH_TOKEN_PATH` 指定 OAuth 文件位置。两个令牌文件及其临时文件均已加入 Git 忽略规则。
-
-先使用已获得小米 Home 云接口权限的 OAuth 应用及其登记回调地址完成授权。
-OAuth 应授权设备所属的小米账号。
-
-```powershell
-dotnet run --project .\MiServiceSharp.Demo -- oauth-login <应用ID> <登记回调地址> cn
+```csharp
+var speakers = await client.Mina.GetDevicesAsync();
+var speaker = speakers.Single(device => device.Name == "客厅音箱");
+await speaker.PauseAsync();
+await speaker.SetVolumeAsync(40);
+var status = await speaker.GetStatusAsync();
 ```
 
-Demo 会打开浏览器。授权跳转后，将包含 `code` 和 `state` 的完整回调地址粘贴回终端。
-程序校验回调地址和 `state` 后交换并保存凭证，重连时会重新读取凭证，接近过期时自动刷新。
-使用小米官方 Xiaomi Home（Home Assistant）应用授权时，页面会显示该应用身份，其公开参数见官方仓库的 `miot/const.py`。
-为该官方应用传入 `http://homeassistant.local:8123` 基址时，程序会自动补齐 `/api/webhook/<随机ID>` 回调路径，并按官方方式生成设备绑定的 `state`。
-授权请求保存到 `.mi.oauth.pending.json`。进程中断后可运行以下命令，再粘贴同一次授权得到的完整回调地址。
+## MIoT 型号与能力
+
+同类设备通过标准服务、属性和动作名称描述能力，具体功能由每个型号的 Spec 决定。服务 IID、属性 IID、动作 IID、值范围、枚举和权限均按设备自己的定义解析。
+
+| 标记 | 代码属性 | 含义 |
+| --- | --- | --- |
+| R | `CanRead` | 可读取当前值 |
+| W | `CanWrite` | 可写入值 |
+| N | `CanNotify` | 支持属性变化上报 |
+
+属性的完整定义通过 `Definition` 获取。写入时检查类型、数值范围、步长和枚举，动作调用时检查参数数量与类型。同名能力出现多次时，使用 IID 或完整 URN 定位。
+
+当前代码通过以下地址在线获取 Spec，型号索引缓存到系统临时目录，设备对象缓存已加载的型号定义。
+
+```text
+http://miot-spec.org/miot-spec-v2/instances?status=all
+http://miot-spec.org/miot-spec-v2/instance?type=<完整类型URN>
+```
+
+## 云端消息订阅
+
+订阅使用 OAuth 凭证和 MQTT 5/TLS。属性变化回调提供 DID、SIID、PIID、JSON 值和接收时间，设备事件回调提供 DID、SIID、EIID、参数数组和接收时间。
+
+### 完成 OAuth 授权
+
+直接使用官方 Xiaomi Home（Home Assistant）应用的现成授权入口。授权账号应为设备所属账号，页面会显示该应用的身份与权限范围。以下命令使用中国区 `cn`，其他支持的区域为 `de`、`i2`、`ru`、`sg`、`us`。
+
+```powershell
+dotnet run --project .\MiServiceSharp.Demo -- oauth-login 2882303761520251711 http://homeassistant.local:8123 cn
+```
+
+Demo 自动补齐该应用的 `/api/webhook/<随机ID>` 回调路径并生成设备绑定的 `state`。在浏览器确认授权后，将包含 `code` 和 `state` 的完整回调地址粘贴回终端。即使本机无法访问回调主机，也可以复制浏览器地址栏中的完整回调地址。
+
+程序校验回调路径及 `state`，交换凭证并保存到 `.mi.oauth.json`。授权发起时的上下文保存在 `.mi.oauth.pending.json`，进程中断后可恢复同一次授权。
 
 ```powershell
 dotnet run --project .\MiServiceSharp.Demo -- oauth-complete
 ```
 
-`oauth-login` 支持 `--manual`，适用于手动选择浏览器的环境。成功交换并保存凭证后会清理待完成请求。
+`oauth-login` 追加 `--manual` 时，手动打开终端打印的授权地址。成功保存凭证后，待完成授权文件会被清理。
+
+### 在 Demo 中订阅
 
 ```powershell
-# 指定设备的单个属性，支持名称、数字 IID 和完整 URN
-dotnet run --project .\MiServiceSharp.Demo -- watch 132634187 2 1
-dotnet run --project .\MiServiceSharp.Demo -- watch 132634187 light on
+# 单个属性，服务与属性也可以使用数字 IID
+dotnet run --project .\MiServiceSharp.Demo -- watch "客厅灯" light on
 
-# 指定设备的全部属性或全部事件
-dotnet run --project .\MiServiceSharp.Demo -- watch 132634187
-dotnet run --project .\MiServiceSharp.Demo -- watch-events 132634187
+# 全部属性
+dotnet run --project .\MiServiceSharp.Demo -- watch "客厅灯"
 
-# 单个设备事件
-dotnet run --project .\MiServiceSharp.Demo -- watch-events <设备ID> <siid> <eiid>
+# 全部事件或一个指定事件
+dotnet run --project .\MiServiceSharp.Demo -- watch-events "设备名称"
+dotnet run --project .\MiServiceSharp.Demo -- watch-events "设备名称" <siid> <eiid>
 ```
 
-按 Ctrl+C 取消订阅并关闭连接。事件使用小米协议中的 `event_occured` Topic。
-库中可直接对绑定设备的属性对象订阅。
+按 Ctrl+C 取消订阅并关闭连接。实际推送取决于设备能力、在线状态及变化上报。
+
+### C# 完整订阅示例
+
+以下代码可作为控制台项目的 `Program.cs`。先完成账号登录和 OAuth 授权，再设置两个 Token 文件的实际路径，并替换设备名称。
 
 ```csharp
+using MiServiceSharp;
+using MiServiceSharp.Auth;
+using MiServiceSharp.Storage;
+
 using var stopping = new CancellationTokenSource();
-Console.CancelKeyPress += (_, args) => { args.Cancel = true; stopping.Cancel(); };
-using var oauthHttp = new HttpClient();
-var tokens = new MiOAuthTokenProvider(new MiOAuthClient(oauthHttp),
+Console.CancelKeyPress += (_, args) =>
+{
+    args.Cancel = true;
+    stopping.Cancel();
+};
+
+using var http = new HttpClient();
+var account = new MiAccountClient(http, new MiAccountOptions(),
+    new FileMiTokenStore(FileMiTokenStore.GetDefaultPath()));
+await account.InitializeAsync(stopping.Token);
+var client = new MiServiceFacade(account);
+
+var tokens = new MiOAuthTokenProvider(new MiOAuthClient(http),
     new FileMiOAuthTokenStore(FileMiOAuthTokenStore.GetDefaultPath()));
 await using var notifications = client.CreateSubscriptionClient(tokens);
-notifications.Error += (_, error) => Console.Error.WriteLine(error.Exception.Message);
-
-var light = (await client.MiioCloud.GetDevicesAsync()).Single(device => device.Did == "132634187");
-var power = (await light.GetServiceAsync("light")).GetProperty("on");
-await using var subscription = await power.SubscribeAsync(notifications, (change, callbackToken) =>
+notifications.Error += (_, error) =>
 {
-    Console.WriteLine($"{change.DeviceId} {change.Siid}/{change.Piid} = {change.Value}");
-    return Task.CompletedTask;
-});
+    Console.Error.WriteLine(error.Exception.Message);
+};
+
+var devices = await client.MiioCloud.GetDevicesAsync(cancellationToken: stopping.Token);
+var light = devices.Single(device => device.Name == "客厅灯");
+var power = (await light.GetServiceAsync("light", stopping.Token)).GetProperty("on");
+
 try
 {
+    await using var subscription = await power.SubscribeAsync(
+        notifications,
+        (change, callbackToken) =>
+        {
+            Console.WriteLine($"{change.DeviceId} {change.Siid}/{change.Piid} = {change.Value}");
+            return Task.CompletedTask;
+        },
+        stopping.Token);
+
+    Console.WriteLine("正在监听，按 Ctrl+C 结束。");
     await Task.Delay(Timeout.InfiniteTimeSpan, stopping.Token);
 }
-catch (OperationCanceledException) when (stopping.IsCancellationRequested) { }
+catch (OperationCanceledException) when (stopping.IsCancellationRequested)
+{
+}
 ```
 
-设备对象还提供 `SubscribePropertiesAsync` 和 `SubscribeEventsAsync`，单个事件可调用订阅客户端的 `SubscribeEventAsync`。
-每个订阅句柄均实现 `IAsyncDisposable`。同 Topic 的多个监听器共享一次 Broker 订阅，最后一个监听器释放时取消该 Topic。
-断线后会重新连接并恢复全部有效订阅。回调在独立分发任务中按顺序执行，支持在回调内取消订阅。
-消息按 MQTT QoS 1 接收，可能重复投递。默认缓冲容量为 1024，缓冲满或回调失败会触发 `Error`，回调应及时返回并响应取消。
-所有连接参数可通过 `MiotSubscriptionOptions` 配置，TLS 默认启用并使用系统证书验证。
+订阅建立时自动连接。需要初始状态时，另外调用 `await power.GetAsync()`。
 
-### 测试
+订阅整个设备时，可将上例中的 `power.SubscribeAsync(...)` 替换为以下任一调用，沿用相同的连接及等待逻辑。
 
-```powershell
-dotnet test MiServiceSharp.sln
+```csharp
+// 全部属性变化
+await using var properties = await light.SubscribePropertiesAsync(
+    notifications,
+    (change, token) =>
+    {
+        Console.WriteLine($"属性 {change.Siid}/{change.Piid} = {change.Value}");
+        return Task.CompletedTask;
+    });
+
+// 全部设备事件
+await using var events = await light.SubscribeEventsAsync(
+    notifications,
+    (message, token) =>
+    {
+        Console.WriteLine($"事件 {message.Siid}/{message.Eiid} {message.Arguments}");
+        return Task.CompletedTask;
+    });
 ```
 
-真实账号集成测试默认跳过。设置 `RUN_MI_INTEGRATION=1` 后会测试登录与设备列表查询。
-设备的读取、写入和动作调用均由 Demo 中对应的命令执行。
-设置 `RUN_MI_OAUTH_INTEGRATION=1` 和 `MI_OAUTH_TEST_DEVICE=<已授权设备ID>` 后，可以运行 `OAuthCloudIntegrationTests`，验证真实 OAuth 刷新、MQTT 连接和设备订阅。
+单个事件使用 `notifications.SubscribeEventAsync(did, siid, eiid, handler)`。
 
-## WebAPI 用法
+### 生命周期与连接配置
 
-启动 API：
+- 订阅句柄和订阅客户端均实现 `IAsyncDisposable`，使用 `await using` 释放。
+- 同一 Topic 的监听器共享 Broker 订阅，最后一个监听器释放时取消该 Topic。
+- 断线后自动重连并恢复有效订阅，OAuth Token 接近过期时自动刷新。
+- 回调按顺序在独立分发任务中执行，支持回调内取消订阅。耗时工作应异步处理并响应回调的取消令牌。
+- MQTT QoS 1 可能重复投递。默认消息缓冲容量为 1024，缓冲满或回调失败会触发 `Error`。
+- `CreateSubscriptionClient(tokens, options)` 接受 `MiotSubscriptionOptions`，可配置主机、端口、TLS、超时、重连间隔和缓冲容量。默认端口 `8883`，启用 TLS 与系统证书验证。
+
+## 凭证与配置
+
+| 配置 | 用途与默认行为 |
+| --- | --- |
+| `MI_USER` / `MI_PASS` | Demo 账号登录使用的小米账号和密码 |
+| `MI_TOKEN_PATH` | `FileMiTokenStore.GetDefaultPath()` 使用的账号凭证路径 |
+| `MI_OAUTH_TOKEN_PATH` | Demo 使用的 OAuth 凭证路径 |
+| `MI_LOCAL_HOST` / `MI_LOCAL_TOKEN` | Demo 局域网 miIO 的地址与设备 Token |
+
+账号凭证默认从程序输出目录向上查找 `MiServiceSharp.sln` 所在目录，并使用其中的 `.mi.token.json`。发布到独立目录后，默认使用程序所在目录，也可显式指定路径。
+
+OAuth 默认文件 `.mi.oauth.json` 位于默认账号凭证路径的同级目录。类库中需要自定义 OAuth 路径时，显式传给 `new FileMiOAuthTokenStore(path)`。`MI_OAUTH_TOKEN_PATH` 由 Demo 命令读取。
+
+账号凭证用于查询与控制，OAuth 凭证用于订阅。凭证文件及其临时文件已加入 Git 忽略规则。
+
+## WebAPI
 
 ```powershell
-cd E:\GIT\MiServiceSharp
 dotnet run --project .\MiServiceSharp.Api
 ```
 
-关键接口：
+开发环境通过 `/swagger` 查看完整请求模型及接口。请求示例见 [MiServiceSharp.Api.http](MiServiceSharp.Api/MiServiceSharp.Api.http)。
 
-- Auth
-  - `POST /api/v1/auth/login`：登录并落盘 token
-  - `POST /api/v1/auth/login/challenge/start`：开启“二次验证会话式登录”
-  - `POST /api/v1/auth/login/challenge/continue`：用户完成手机验证后继续
-  - `GET /api/v1/auth/login/challenge/{sessionId}`：查询会话状态
-  - `POST /api/v1/auth/jwt`：登录并签发 JWT
-  - `GET /api/v1/auth/token`：读取当前 token
-- MiNA
-  - `GET /api/v1/mina/devices`：获取音箱设备
-  - `POST /api/v1/mina/tts`：TTS 播报
-  - `POST /api/v1/mina/play-url`：URL 播放
-- MiIO Cloud
-  - `GET /api/v1/miio/devices`：获取 MiIO 设备（含 token）
-  - `POST /api/v1/miio/home-rpc`：通用 MiIO 云端 RPC
-  - `POST /api/v1/miio/home/get-props`：对应 `home_get_props`
-  - `POST /api/v1/miio/home/get-prop`：对应 `home_get_prop`
-  - `POST /api/v1/miio/home/set-props`：对应 `home_set_props`
-  - `POST /api/v1/miio/home/set-prop`：对应 `home_set_prop`
-  - `POST /api/v1/miio/miot/get-props`：对应 `miot_get_props`
-  - `POST /api/v1/miio/miot/get-prop`：对应 `miot_get_prop`
-  - `POST /api/v1/miio/miot/set-props`：对应 `miot_set_props`
-  - `POST /api/v1/miio/miot/set-prop`：对应 `miot_set_prop`
-  - `POST /api/v1/miio/miot/action`：对应 `miot_action`
-  - `POST /api/v1/miio/miot-spec`：对应 `miot_spec`
-- MiIO Local
-  - `POST /api/v1/miio/local/command`：本地 miIO UDP 命令
+API 默认配置 `MiService:TokenFile` 为 `./data/.mi.token.json`，相对路径按进程工作目录解析。可通过环境变量 `MiService__TokenFile` 指向已有账号凭证。API Key 和 JWT 配置位于 `Security` 配置节，可通过 `Security__ApiKey`、`Security__JwtSigningKey` 等环境变量设置。
 
-鉴权说明：
+### 接口
 
-- ` /api/health`、`/api/auth/login`、`/api/auth/jwt` 允许匿名。
-- 其余 `/api/**` 需要二选一：
-  - 请求头 `X-API-Key: <appsettings中的Security.ApiKey>`
-  - 或 `Authorization: Bearer <jwt>`
-- 服务异常统一返回 `application/problem+json`（ProblemDetails）。
-- 若小米登录返回 `notificationUrl`，建议走 challenge 会话流程：
-  1) 调用 `/api/v1/auth/login/challenge/start` 获取 `202 + sessionId + verificationUrl`
-  2) 用户在浏览器完成短信验证
-  3) 调用 `/api/v1/auth/login/challenge/continue` 并轮询 `/api/v1/auth/login/challenge/{sessionId}`
-  4) 状态变为 `succeeded` 后继续调用其他接口
+下表路径统一以 `/api/v1` 为前缀。
 
-Swagger UI：开发环境访问 `/swagger`，支持 Bearer 与 API Key 的 Authorize 按钮。
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/health` | 健康检查 |
+| POST | `/auth/login` | 登录并保存账号凭证 |
+| POST | `/auth/login/challenge/start` | 创建安全验证会话 |
+| POST | `/auth/login/challenge/continue` | 完成浏览器验证后继续登录 |
+| GET | `/auth/login/challenge/{sessionId}` | 查询验证会话状态 |
+| POST | `/auth/jwt` | 登录并签发 JWT |
+| GET | `/auth/token` | 读取账号凭证 |
+| POST | `/auth/token/clear` | 清除账号凭证 |
+| GET | `/mina/devices` | 查询音箱 |
+| POST | `/mina/tts`、`/mina/play-url`、`/mina/player-op` | 播报、播放 URL 与播放器操作 |
+| GET | `/miio/devices` | 查询米家设备及设备 Token |
+| POST | `/miio/home-rpc` | 通用米家云端 RPC |
+| POST | `/miio/home/get-props`、`/miio/home/get-prop` | 读取 miIO 属性 |
+| POST | `/miio/home/set-props`、`/miio/home/set-prop` | 写入 miIO 属性 |
+| POST | `/miio/miot/get-props`、`/miio/miot/get-prop` | 读取 MIoT 属性 |
+| POST | `/miio/miot/set-props`、`/miio/miot/set-prop` | 写入 MIoT 属性 |
+| POST | `/miio/miot/action` | 调用 MIoT 动作 |
+| POST | `/miio/miot-spec` | 获取 Spec |
+| POST | `/miio/local/command` | 局域网 miIO 命令 |
 
-请求示例见 [MiServiceSharp.Api/MiServiceSharp.Api.http](MiServiceSharp.Api/MiServiceSharp.Api.http)。
+### 鉴权与安全验证流程
+
+以下路径允许匿名访问。
+
+- `GET /api/v1/health`
+- `POST /api/v1/auth/login`
+- `POST /api/v1/auth/jwt`
+- `POST /api/v1/auth/login/challenge/start`
+- `POST /api/v1/auth/login/challenge/continue`
+
+其余 `/api/**` 请求携带 `X-API-Key: <Security.ApiKey>` 或 `Authorization: Bearer <jwt>`。服务异常统一返回 ProblemDetails。
+
+小米账号要求安全验证时，按以下流程操作。
+
+1. 调用 `/api/v1/auth/login/challenge/start`，取得 `202`、`sessionId` 和 `verificationUrl`。
+2. 用户在浏览器完成验证。
+3. 调用 `/api/v1/auth/login/challenge/continue`。
+4. 携带 API Key 或 JWT 查询 `/api/v1/auth/login/challenge/{sessionId}`，状态为 `succeeded` 后调用设备接口。
+
+## 构建与测试
+
+```powershell
+dotnet build MiServiceSharp.sln --configuration Release
+dotnet test MiServiceSharp.sln --configuration Release
+```
+
+默认测试覆盖账号恢复、凭证存储、设备能力解析、值校验、OAuth 流程及本地 MQTT Broker 订阅。真实账号和云端测试由环境变量启用。
+
+```powershell
+# 使用已有凭证，或先设置 MI_USER / MI_PASS
+$env:RUN_MI_INTEGRATION = "1"
+dotnet test MiServiceSharp.sln --filter FullyQualifiedName~IntegrationSmokeTests
+Remove-Item Env:RUN_MI_INTEGRATION
+
+# 先完成 OAuth 授权，再填入已授权设备的 DID
+$env:RUN_MI_OAUTH_INTEGRATION = "1"
+$env:MI_OAUTH_TEST_DEVICE = "已授权设备DID"
+dotnet test MiServiceSharp.sln --filter FullyQualifiedName~OAuthCloudIntegrationTests
+Remove-Item Env:RUN_MI_OAUTH_INTEGRATION
+Remove-Item Env:MI_OAUTH_TEST_DEVICE
+```
+
+OAuth 集成测试会刷新并保存凭证，验证 MQTT 连接与订阅建立。实际属性推送可通过 `watch` 观察，并在米家 App 或设备端改变对应属性。
+
+## 常见问题
+
+### 提示设备匹配数量为 0 或大于 1
+
+先用 `miio-devices` 或 `mina-devices` 确认名称与 ID。同名设备使用对应 ID 精确定位。
+
+### 提示服务、属性或动作匹配失败
+
+运行 `capabilities <device>` 查看当前型号的定义，按输出中的名称、IID 或完整 URN 调用。同类设备的能力和 IID 应以各自型号为准。
+
+### 属性带 N，如何获取变化
+
+完成 OAuth 授权后调用属性对象的 `SubscribeAsync`，或者运行 `watch <device> <service> <property>`。可通过 `GetAsync` 获取初始值，再处理后续变化。
+
+### OAuth 授权中断或授权码失效
+
+保留完整回调地址，使用 `oauth-complete` 恢复待完成请求。授权码失效或已被消费时，重新运行 `oauth-login` 完成新一轮授权。
+
+### 从输出目录启动时找不到凭证
+
+确认程序位于仓库目录内，或设置 `MI_TOKEN_PATH` 和 Demo 的 `MI_OAUTH_TOKEN_PATH`。自己的应用可直接为两个 Store 传入绝对路径。
+
+## 项目结构
+
+| 目录或文件 | 用途 |
+| --- | --- |
+| `MiServiceSharp/Auth/` | 小米账号与 OAuth 认证 |
+| `MiServiceSharp/Storage/` | 凭证存储 |
+| `MiServiceSharp/Devices/` | 设备、服务、属性与动作对象 |
+| `MiServiceSharp/Services/` | MiNA、米家云端协议 |
+| `MiServiceSharp/Subscriptions/` | MQTT 属性与事件订阅 |
+| `MiServiceSharp/Protocol/LocalMiio/` | 局域网 miIO UDP 协议 |
+| `MiServiceSharp/Models/` | 响应模型与 Spec 定义 |
+| `MiServiceSharp/MiServiceFacade.cs` | 类库聚合入口 |
+| `MiServiceSharp.Demo/` | 命令行演示 |
+| `MiServiceSharp.Api/` | HTTP API |
+| `MiServiceSharp.Tests/` | 单元与集成测试 |
 
 ## 许可证
 

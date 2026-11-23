@@ -11,8 +11,9 @@ public static class MiioCrypto
         using var aes = Aes.Create();
         aes.Mode = CipherMode.CBC;
         aes.Padding = PaddingMode.PKCS7;
-        aes.Key = token;
-        aes.IV = token;
+        var key = MD5.HashData(token);
+        aes.Key = key;
+        aes.IV = MD5.HashData(key.Concat(token).ToArray());
 
         using var encryptor = aes.CreateEncryptor();
         return encryptor.TransformFinalBlock(plain, 0, plain.Length);
@@ -23,8 +24,9 @@ public static class MiioCrypto
         using var aes = Aes.Create();
         aes.Mode = CipherMode.CBC;
         aes.Padding = PaddingMode.PKCS7;
-        aes.Key = token;
-        aes.IV = token;
+        var key = MD5.HashData(token);
+        aes.Key = key;
+        aes.IV = MD5.HashData(key.Concat(token).ToArray());
 
         using var decryptor = aes.CreateDecryptor();
         return decryptor.TransformFinalBlock(cipher, 0, cipher.Length);
