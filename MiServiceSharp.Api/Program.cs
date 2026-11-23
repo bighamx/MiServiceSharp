@@ -76,7 +76,7 @@ builder.Services.AddProblemDetails();
 var security = builder.Configuration.GetSection("Security").Get<SecurityOptions>() ?? new SecurityOptions();
 
 var tokenFile = builder.Configuration["MiService:TokenFile"]
-    ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".mi.token.json");
+    ?? FileMiTokenStore.GetDefaultPath();
 
 builder.Services.AddSingleton<IMiTokenStore>(_ => new FileMiTokenStore(tokenFile));
 builder.Services.AddHttpClient();
@@ -729,7 +729,7 @@ public sealed class MiioMiotSetPropRequest
     public string Did { get; set; } = string.Empty;
     public int Siid { get; set; }
     public int Piid { get; set; }
-    public string? Value { get; set; }
+    public JsonNode? Value { get; set; }
 }
 
 public sealed class MiioMiotActionRequest

@@ -2,6 +2,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
+using MiServiceSharp.Devices;
 using MiServiceSharp.Auth;
 using MiServiceSharp.Models;
 
@@ -12,13 +14,20 @@ public sealed class MiioCloudService
     private const string MiotSpecInstancesUrl = "http://miot-spec.org/miot-spec-v2/instances?status=all";
     private const string MiotSpecInstanceUrl = "http://miot-spec.org/miot-spec-v2/instance?type=";
     private static readonly HttpClient MiotSpecHttpClient = new();
+    private static readonly JsonSerializerOptions ResponseOptions = new()
+    {
+        NumberHandling = JsonNumberHandling.AllowReadingFromString,
+        Converters = { new FlexibleStringConverter() }
+    };
 
     private readonly MiAccountClient _account;
     private readonly string _server;
+    private readonly HttpClient _specHttpClient;
 
-    public MiioCloudService(MiAccountClient account, string? region = null)
+    public MiioCloudService(MiAccountClient account, string? region = null, HttpClient? specHttpClient = null)
     {
         _account = account;
+        _specHttpClient = specHttpClient ?? MiotSpecHttpClient;
         _server = "https://" + (string.IsNullOrWhiteSpace(region) || region == "cn" ? string.Empty : region + ".") + "api.io.mi.com/app";
     }
 
@@ -37,7 +46,7 @@ public sealed class MiioCloudService
     {
         var headers = new Dictionary<string, string>
         {
-            ["User-Agent"] = "iOS-14.4-6.0.103-iPhone12,3--D7744744F7AF32F0544445285880DD63E47D9BE9-8816080-84A3F44E137B71AE-iPhone",
+            ["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
             ["x-xiaomi-protocal-flag-cli"] = "PROTOCAL-HTTP2"
         };
 
@@ -53,7 +62,7 @@ public sealed class MiioCloudService
             headers,
             cancellationToken: cancellationToken);
 
-        var envelope = response.Deserialize<MiioResponse<T>>();
+        var envelope = response.Deserialize<MiioResponse<T>>(ResponseOptions);
         if (envelope is null)
         {
             throw new InvalidOperationException($"MiIO response envelope invalid: {response}");
@@ -169,9 +178,46 @@ public sealed class MiioCloudService
         return values.Count > 0 ? values[0] : null;
     }
 
+    public async Task<JsonNode?> MiotGetValueAsync(string did, int siid, int piid, CancellationToken cancellationToken = default)
+    {
+        var result = await MiotRequestAsync("prop/get", new JsonArray(new JsonObject
+        {
+            ["did"] = did,
+            ["siid"] = siid,
+            ["piid"] = piid
+        }), cancellationToken);
+        var item = result.AsArray().Single();
+        var code = item?["code"]?.GetValue<int>() ?? -1;
+        if (code != 0)
+        {
+            throw new InvalidOperationException($"MIoT property read failed (code={code}).");
+        }
+        return item?["value"]?.DeepClone();
+    }
+
+    public async Task<JsonNode> InvokeMiotActionAsync(string did, int siid, int aiid, IEnumerable<object?>? arguments = null, CancellationToken cancellationToken = default)
+    {
+        var result = await MiotRequestAsync("action", new JsonObject
+        {
+            ["did"] = did,
+            ["siid"] = siid,
+            ["aiid"] = aiid,
+            ["in"] = JsonSerializer.SerializeToNode(arguments?.ToArray() ?? [])
+        }, cancellationToken);
+        var code = result["code"]?.GetValue<int>() ?? -1;
+        if (code != 0)
+        {
+            throw new InvalidOperationException($"MIoT action failed (code={code}).");
+        }
+        return result;
+    }
+
+    public async Task<IReadOnlyList<MiioDeviceClient>> GetDevicesAsync(string? name = null, CancellationToken cancellationToken = default)
+        => (await DeviceListAsync(name, cancellationToken: cancellationToken)).Select(device => new MiioDeviceClient(this, device)).ToArray();
+
     public async Task<IReadOnlyList<int>> MiotSetPropsAsync(
         string did,
-        IEnumerable<(int Siid, int Piid, object Value)> props,
+        IEnumerable<(int Siid, int Piid, object? Value)> props,
         CancellationToken cancellationToken = default)
     {
         var parameters = new JsonArray(
@@ -200,7 +246,7 @@ public sealed class MiioCloudService
         CancellationToken cancellationToken = default)
         => MiotSetPropsAsync(
             did,
-            props.Select(static item => (item.Siid, item.Piid, (object?)item.Value ?? string.Empty)),
+            props.Select(static item => (item.Siid, item.Piid, (object?)item.Value)),
             cancellationToken);
 
     public async Task<IReadOnlyList<int>> MiotSetPropMultiAsync(
@@ -231,7 +277,7 @@ public sealed class MiioCloudService
 
     public async Task<int> MiotSetPropAsync(string did, (int Siid, int Piid) iid, object? value, CancellationToken cancellationToken = default)
     {
-        var result = await MiotSetPropsAsync(did, [(iid.Siid, iid.Piid, value ?? string.Empty)], cancellationToken);
+        var result = await MiotSetPropsAsync(did, [(iid.Siid, iid.Piid, value)], cancellationToken);
         return result.Count > 0 ? result[0] : -1;
     }
 
@@ -269,7 +315,7 @@ public sealed class MiioCloudService
         var finalType = await ResolveSingleMiotSpecTypeAsync(type, cancellationToken);
 
         using var request = new HttpRequestMessage(HttpMethod.Get, MiotSpecInstanceUrl + Uri.EscapeDataString(finalType));
-        using var response = await MiotSpecHttpClient.SendAsync(request, cancellationToken);
+        using var response = await _specHttpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         var responseText = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -305,6 +351,11 @@ public sealed class MiioCloudService
 
         var all = await LoadAllMiotSpecModelsAsync(cancellationToken);
         var matched = MatchMiotSpecModels(all, type);
+        if (matched.Count == 0)
+        {
+            all = await LoadAllMiotSpecModelsAsync(cancellationToken, refresh: true);
+            matched = MatchMiotSpecModels(all, type);
+        }
         if (matched.Count == 1)
         {
             return matched.Values.First();
@@ -437,13 +488,13 @@ public sealed class MiioCloudService
         return -1;
     }
 
-    private static async Task<Dictionary<string, string>> LoadAllMiotSpecModelsAsync(CancellationToken cancellationToken)
+    private async Task<Dictionary<string, string>> LoadAllMiotSpecModelsAsync(CancellationToken cancellationToken, bool refresh = false)
     {
         var cachePath = Path.Combine(Path.GetTempPath(), "miservice_miot_specs.json");
 
         try
         {
-            if (File.Exists(cachePath))
+            if (!refresh && File.Exists(cachePath))
             {
                 var cachedText = await File.ReadAllTextAsync(cachePath, cancellationToken);
                 var cached = JsonSerializer.Deserialize<Dictionary<string, string>>(cachedText);
@@ -453,12 +504,12 @@ public sealed class MiioCloudService
                 }
             }
         }
-        catch
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
         {
         }
 
         using var request = new HttpRequestMessage(HttpMethod.Get, MiotSpecInstancesUrl);
-        using var response = await MiotSpecHttpClient.SendAsync(request, cancellationToken);
+        using var response = await _specHttpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         var responseText = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -484,13 +535,23 @@ public sealed class MiioCloudService
             }
         }
 
+        var temporaryPath = cachePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
             var saveText = JsonSerializer.Serialize(all);
-            await File.WriteAllTextAsync(cachePath, saveText, cancellationToken);
+            await File.WriteAllTextAsync(temporaryPath, saveText, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            File.Move(temporaryPath, cachePath, overwrite: true);
         }
-        catch
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
         }
 
         return all;

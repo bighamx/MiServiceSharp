@@ -1,6 +1,8 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Collections.Concurrent;
 using MiServiceSharp.Auth;
+using MiServiceSharp.Devices;
 using MiServiceSharp.Models;
 
 namespace MiServiceSharp.Services;
@@ -13,7 +15,7 @@ public sealed class MinaService
     ];
 
     private readonly MiAccountClient _account;
-    private readonly Dictionary<string, string> _deviceHardwareMap = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, string> _deviceHardwareMap = new(StringComparer.OrdinalIgnoreCase);
 
     public MinaService(MiAccountClient account)
     {
@@ -40,6 +42,7 @@ public sealed class MinaService
         }
         else
         {
+            data = new Dictionary<string, string>(data);
             data["requestId"] = requestId;
         }
 
@@ -93,7 +96,10 @@ public sealed class MinaService
         return devices;
     }
 
-    public Task<JsonNode> UbusRequestAsync(string deviceId, string method, string path, object message, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<MinaDeviceClient>> GetDevicesAsync(CancellationToken cancellationToken = default)
+        => (await DeviceListAsync(cancellationToken: cancellationToken)).Select(device => new MinaDeviceClient(this, device)).ToArray();
+
+    public async Task<JsonNode> UbusRequestAsync(string deviceId, string method, string path, object message, CancellationToken cancellationToken = default)
     {
         var payload = new Dictionary<string, string>
         {
@@ -103,14 +109,23 @@ public sealed class MinaService
             ["path"] = path
         };
 
-        return MinaRequestAsync("/remote/ubus", payload, cancellationToken);
+        var result = await MinaRequestAsync("/remote/ubus", payload, cancellationToken);
+        if (result["code"]?.GetValue<int>() is int code && code != 0)
+        {
+            throw new InvalidOperationException($"MiNA device operation failed (code={code}).");
+        }
+        return result;
     }
 
     public Task<JsonNode> TextToSpeechAsync(string deviceId, string text, CancellationToken cancellationToken = default)
         => UbusRequestAsync(deviceId, "text_to_speech", "mibrain", new { text }, cancellationToken);
 
     public Task<JsonNode> PlayerSetVolumeAsync(string deviceId, int volume, CancellationToken cancellationToken = default)
-        => UbusRequestAsync(deviceId, "player_set_volume", "mediaplayer", new { volume, media = "app_ios" }, cancellationToken);
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(volume);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(volume, 100);
+        return UbusRequestAsync(deviceId, "player_set_volume", "mediaplayer", new { volume, media = "app_ios" }, cancellationToken);
+    }
 
     public Task<JsonNode> PlayerPauseAsync(string deviceId, CancellationToken cancellationToken = default)
         => UbusRequestAsync(deviceId, "player_play_operation", "mediaplayer", new { action = "pause", media = "app_ios" }, cancellationToken);

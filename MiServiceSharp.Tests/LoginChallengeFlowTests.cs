@@ -8,6 +8,17 @@ namespace MiServiceSharp.Tests;
 public sealed class LoginChallengeFlowTests
 {
     [Fact]
+    public void NeedNotificationVerification_WithNumericUserIdAndCompleteTokens_ShouldBeFalse()
+    {
+        var node = JsonNode.Parse("""
+            {"notificationUrl":"https://account.xiaomi.com/test","code":0,"userId":123,
+             "location":"https://example.invalid/sts","ssecurity":"test","nonce":1,"passToken":"test-pass"}
+            """)!;
+        var method = typeof(MiAccountClient).GetMethod("NeedNotificationVerification", BindingFlags.NonPublic | BindingFlags.Static)!;
+        Assert.Equal(false, method.Invoke(null, [node]));
+    }
+
+    [Fact]
     public void NeedNotificationVerification_WithNotificationAndMissingTokens_ShouldBeTrue()
     {
         var node = JsonNode.Parse(

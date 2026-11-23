@@ -1,6 +1,10 @@
 .vs/
 *.user
 *.suo
+.mi.token*
+.mi.oauth*
+**/.mi.oauth*
+**/.mi.token*
 MiServiceSharp.sln.DotSettings.user
 **/bin/
 **/obj/

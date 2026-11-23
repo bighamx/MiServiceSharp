@@ -6,72 +6,31 @@ namespace MiServiceSharp.Tests;
 
 public sealed class IntegrationSmokeTests
 {
-    [Fact]
+    [MiIntegrationFact]
     public async Task Login_And_Query_DeviceLists_ShouldWork()
     {
-        var run = IsTruthy(GetEnv("RUN_MI_INTEGRATION"));
-        if (!run)
-        {
-            return;
-        }
-
-        var user = GetEnv("MI_USER") ?? string.Empty;
-        var pass = GetEnv("MI_PASS") ?? string.Empty;
-        Assert.False(string.IsNullOrWhiteSpace(user));
-        Assert.False(string.IsNullOrWhiteSpace(pass));
-
-        var tokenPath = Path.Combine(Path.GetTempPath(), $"miservice-integration.json");
-        var store = new FileMiTokenStore(tokenPath);
+        var store = new FileMiTokenStore(FileMiTokenStore.GetDefaultPath());
         using var httpClient = new HttpClient();
         var account = new MiAccountClient(httpClient, new MiAccountOptions
         {
-            Username = user,
-            Password = pass,
-            EnableInteractiveVerification = true
+            Username = Environment.GetEnvironmentVariable("MI_USER") ?? string.Empty,
+            Password = Environment.GetEnvironmentVariable("MI_PASS") ?? string.Empty,
+            EnableInteractiveVerification = false
         }, store);
-
-        await account.InitializeAsync();
-        var loginMina = await account.LoginAsync("micoapi");
-        var loginMiio = await account.LoginAsync("xiaomiio");
-
-        Assert.True(loginMina, "micoapi 登录失败，可能需要先完成 notificationUrl 的手机验证。");
-        Assert.True(loginMiio, "xiaomiio 登录失败，可能需要先完成 notificationUrl 的手机验证。");
-
-        var mina = new MinaService(account);
-        var miio = new MiioCloudService(account);
-        var minaDevices = await mina.DeviceListAsync();
-        var miioDevices = await miio.DeviceListAsync();
-
-        var d = minaDevices.FirstOrDefault(x => x.Name.Contains("客厅"));
-        mina.TextToSpeechAsync(d.DeviceId, "你好，小芮芮");
-
-
-        Assert.NotNull(minaDevices);
-        Assert.NotNull(miioDevices);
+        Assert.True(await account.LoginAsync("micoapi"), account.LastLoginError);
+        Assert.True(await account.LoginAsync("xiaomiio"), account.LastLoginError);
+        Assert.NotEmpty(await new MinaService(account).GetDevicesAsync());
+        Assert.NotEmpty(await new MiioCloudService(account).GetDevicesAsync());
     }
+}
 
-    private static string? GetEnv(string name)
+public sealed class MiIntegrationFactAttribute : FactAttribute
+{
+    public MiIntegrationFactAttribute()
     {
-        return Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.Process)
-            ?? Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.User)
-            ?? Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.Machine)
-            ?? Environment.GetEnvironmentVariable(name);
-    }
-
-    private static bool IsTruthy(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
+        if (Environment.GetEnvironmentVariable("RUN_MI_INTEGRATION") != "1")
         {
-            return false;
+            Skip = "Set RUN_MI_INTEGRATION=1 to test a real Xiaomi account.";
         }
-
-        return value.Trim().ToLowerInvariant() switch
-        {
-            "1" => true,
-            "true" => true,
-            "yes" => true,
-            "on" => true,
-            _ => false
-        };
     }
 }

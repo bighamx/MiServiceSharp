@@ -6,6 +6,28 @@ namespace MiServiceSharp.Tests;
 public sealed class TokenStoreTests
 {
     [Fact]
+    public async Task FileTokenStore_LoadsPythonTokensAndStringUserId()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"miservice-python-{Guid.NewGuid():N}.json");
+        try
+        {
+            await File.WriteAllTextAsync(path, """
+                {"deviceId":"test-device","userId":"123","passToken":"test-pass",
+                 "micoapi":["security-a","service-a"],"xiaomiio":["security-b","service-b"]}
+                """);
+            var token = await new FileMiTokenStore(path).LoadAsync();
+            Assert.NotNull(token);
+            Assert.Equal(123, token.UserId);
+            Assert.Equal("security-a", token.Services["micoapi"].SSecurity);
+            Assert.Equal("service-b", token.Services["XIAOMIIO"].ServiceToken);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public async Task FileTokenStore_RoundTrip_ShouldPersistData()
     {
         var path = Path.Combine(Path.GetTempPath(), $"miservice-token-{Guid.NewGuid():N}.json");
