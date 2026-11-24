@@ -40,16 +40,10 @@ public sealed class MiOAuthClient(HttpClient httpClient)
 
     public async Task<MiOAuthToken> CompleteAuthorizationAsync(MiOAuthAuthorization authorization, Uri callbackUri, CancellationToken cancellationToken = default)
     {
-        var expected = new Uri(authorization.RedirectUri);
-        if (!string.Equals(callbackUri.GetLeftPart(UriPartial.Path), expected.GetLeftPart(UriPartial.Path), StringComparison.Ordinal))
+        var query = ValidateAuthorizationCallback(authorization, callbackUri);
+        if (query.TryGetValue("error", out var error))
         {
-            throw new ArgumentException("The OAuth callback URI does not match the registered redirect URI.", nameof(callbackUri));
-        }
-        var query = ParseQuery(callbackUri.Query);
-        if (!query.TryGetValue("state", out var state)
-            || !CryptographicOperations.FixedTimeEquals(System.Text.Encoding.UTF8.GetBytes(state), System.Text.Encoding.UTF8.GetBytes(authorization.State)))
-        {
-            throw new InvalidOperationException("The OAuth state does not match this authorization request.");
+            throw new InvalidOperationException($"Xiaomi OAuth authorization failed ({error}).");
         }
         if (!query.TryGetValue("code", out var code) || string.IsNullOrWhiteSpace(code))
         {
@@ -143,6 +137,22 @@ public sealed class MiOAuthClient(HttpClient httpClient)
             throw new ArgumentException("A numeric Xiaomi OAuth application ID is required.", nameof(appId));
         }
         return value;
+    }
+
+    internal static Dictionary<string, string> ValidateAuthorizationCallback(MiOAuthAuthorization authorization, Uri callbackUri)
+    {
+        var expected = new Uri(authorization.RedirectUri);
+        if (!string.Equals(callbackUri.GetLeftPart(UriPartial.Path), expected.GetLeftPart(UriPartial.Path), StringComparison.Ordinal))
+        {
+            throw new ArgumentException("The OAuth callback URI does not match the registered redirect URI.", nameof(callbackUri));
+        }
+        var query = ParseQuery(callbackUri.Query);
+        if (!query.TryGetValue("state", out var state)
+            || !CryptographicOperations.FixedTimeEquals(System.Text.Encoding.UTF8.GetBytes(state), System.Text.Encoding.UTF8.GetBytes(authorization.State)))
+        {
+            throw new InvalidOperationException("The OAuth state does not match this authorization request.");
+        }
+        return query;
     }
 
     private static Dictionary<string, string> ParseQuery(string query)

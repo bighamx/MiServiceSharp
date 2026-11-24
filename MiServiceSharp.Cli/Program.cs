@@ -247,29 +247,46 @@ internal static class Program
         if (args.Contains("--manual", StringComparer.Ordinal))
         {
             Console.WriteLine(authorization.AuthorizationUri.AbsoluteUri);
+            return await CompleteOAuthAsync(oauth, store, authorization, cancellationToken);
         }
-        else
+
+        await using var listener = new MiOAuthCallbackListener(authorization);
+        listener.Start();
+        Console.WriteLine($"Listening for the OAuth callback at {listener.CallbackUri}");
+        if (listener.CallbackUri.HostNameType == UriHostNameType.Dns && !listener.CallbackUri.IsLoopback)
         {
-            try
-            {
-                Process.Start(new ProcessStartInfo(authorization.AuthorizationUri.AbsoluteUri) { UseShellExecute = true });
-            }
-            catch (System.ComponentModel.Win32Exception)
-            {
-                Console.WriteLine(authorization.AuthorizationUri.AbsoluteUri);
-            }
+            var hostsPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "drivers", "etc", "hosts");
+            Console.WriteLine($"若回调域名尚未指向 CLI 主机，请在浏览器所在机器上以管理员权限编辑 {hostsPath}");
+            Console.WriteLine("浏览器与 CLI 在同一台机器时，设置或更新以下域名映射。");
+            Console.WriteLine($"127.0.0.1 {listener.CallbackUri.DnsSafeHost}");
+            Console.WriteLine("浏览器与 CLI 在不同机器时，将 127.0.0.1 替换为浏览器可访问的 CLI 主机 IP。");
+            Console.WriteLine($"确保浏览器能访问 CLI 主机的 TCP {listener.CallbackUri.Port} 端口，再确认授权。");
         }
-        return await CompleteOAuthAsync(oauth, store, authorization, cancellationToken);
+        try
+        {
+            Process.Start(new ProcessStartInfo(authorization.AuthorizationUri.AbsoluteUri) { UseShellExecute = true });
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            Console.WriteLine(authorization.AuthorizationUri.AbsoluteUri);
+        }
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromMinutes(10));
+        var callback = await listener.WaitForCallbackAsync(timeout.Token);
+        return await CompleteOAuthAsync(oauth, store, authorization, cancellationToken, callback);
     }
 
     private static async Task<int> CompleteOAuthAsync(MiOAuthClient oauth, FileMiOAuthTokenStore store,
-        MiOAuthAuthorization authorization, CancellationToken cancellationToken)
+        MiOAuthAuthorization authorization, CancellationToken cancellationToken, Uri? callback = null)
     {
-        Console.WriteLine("Paste the final redirect URL containing code and state, then press Enter.");
-        var input = await Console.In.ReadLineAsync(cancellationToken);
-        if (!Uri.TryCreate(input, UriKind.Absolute, out var callback))
+        if (callback is null)
         {
-            throw new ArgumentException("A complete OAuth redirect URL is required.");
+            Console.WriteLine("Paste the final redirect URL containing code and state, then press Enter.");
+            var input = await Console.In.ReadLineAsync(cancellationToken);
+            if (!Uri.TryCreate(input, UriKind.Absolute, out callback))
+            {
+                throw new ArgumentException("A complete OAuth redirect URL is required.");
+            }
         }
         var token = await oauth.CompleteAuthorizationAsync(authorization, callback, cancellationToken);
         await store.SaveAsync(token, cancellationToken);
@@ -323,7 +340,8 @@ internal static class Program
 
     private static void PrintHelp()
     {
-        Console.WriteLine("MiServiceSharp Demo (.NET 8)");
+        Console.WriteLine("MiServiceSharp CLI (.NET 8)");
+        Console.WriteLine("Usage micli.exe <command> [arguments]");
         Console.WriteLine("  login [micoapi|xiaomiio]");
         Console.WriteLine("  import-token <token-file>");
         Console.WriteLine("  oauth-login <app-id> <registered-redirect-uri> [region] [--manual]");
